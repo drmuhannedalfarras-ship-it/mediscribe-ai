@@ -90,3 +90,7 @@ project/
 ## Compliance
 
 This is a development project — not clinically validated, not regulatory approved, not HIPAA compliant as-is. See in-code comments and the AI Copilot principle this system follows: **AI recommends. Physician decides.**
+
+## License
+
+Proprietary — all rights reserved. See [LICENSE](./LICENSE).
