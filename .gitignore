@@ -8,6 +8,8 @@ out-tsc/
 # Environment
 .env
 .env.local
+.env.*.local
+docker-compose.override.yml
 
 # Logs
 *.log
@@ -19,6 +21,14 @@ uploads/
 # IDE
 .vscode/
 .idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
 
 # Angular
 .angular/cache/
