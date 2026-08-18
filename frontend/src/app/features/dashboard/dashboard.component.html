@@ -1,0 +1,22 @@
+<div *ngIf="currentUser$ | async as user">
+  <h1>Welcome, {{ user.firstName }}</h1>
+  <p>Role(s) and status: {{ user.status }}</p>
+</div>
+
+<div class="dashboard-grid">
+  <mat-card>
+    <mat-card-content>
+      <h3>Patients</h3>
+      <p>View and manage patient records.</p>
+      <a mat-button color="primary" routerLink="/patients">Go to Patients</a>
+    </mat-card-content>
+  </mat-card>
+
+  <mat-card>
+    <mat-card-content>
+      <h3>Consultations</h3>
+      <p>View and manage consultations.</p>
+      <a mat-button color="primary" routerLink="/consultations">Go to Consultations</a>
+    </mat-card-content>
+  </mat-card>
+</div>

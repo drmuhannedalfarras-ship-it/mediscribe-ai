@@ -1,0 +1,34 @@
+<h1>New Consultation</h1>
+
+<form [formGroup]="form" (ngSubmit)="submit()">
+  <mat-form-field class="form-field-full" appearance="outline">
+    <mat-label>Patient ID</mat-label>
+    <input matInput formControlName="patientId" />
+  </mat-form-field>
+
+  <mat-form-field class="form-field-full" appearance="outline">
+    <mat-label>Reason for visit</mat-label>
+    <input matInput formControlName="reasonForVisit" />
+  </mat-form-field>
+
+  <mat-form-field class="form-field-full" appearance="outline">
+    <mat-label>Department</mat-label>
+    <input matInput formControlName="department" />
+  </mat-form-field>
+
+  <mat-form-field class="form-field-full" appearance="outline">
+    <mat-label>Specialty</mat-label>
+    <input matInput formControlName="specialty" />
+  </mat-form-field>
+
+  <mat-form-field class="form-field-full" appearance="outline">
+    <mat-label>Notes</mat-label>
+    <textarea matInput formControlName="notes" rows="3"></textarea>
+  </mat-form-field>
+
+  <p class="error-text" *ngIf="errorMessage">{{ errorMessage }}</p>
+
+  <button mat-raised-button color="primary" type="submit" [disabled]="submitting">
+    Create Consultation
+  </button>
+</form>

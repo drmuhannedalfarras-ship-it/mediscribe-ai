@@ -1,0 +1,324 @@
+MediScribe AI
+
+Clinical AI Copilot
+
+MediScribe AI is an enterprise healthcare software platform designed to assist physicians during patient consultations.
+
+The system is intended to reduce physician documentation workload and provide structured, evidence-supported clinical decision support while keeping the physician in full control of clinical decisions.
+
+Core Concept
+
+During a medical consultation, the physician and patient communicate naturally.
+
+The system captures the conversation through appropriate audio input, identifies speakers, converts the conversation into text, extracts clinically relevant information, and generates a structured clinical record.
+
+The long-term system then analyzes the available information and provides physician-facing clinical decision support.
+
+The intended workflow is:
+
+Patient
+↓
+Consultation
+↓
+Audio Capture
+↓
+Speech-to-Text
+↓
+Speaker Identification
+↓
+Clinical Information Extraction
+↓
+Structured Medical History
+↓
+Clinical Summary
+↓
+Missing Information Detection
+↓
+Clinical Evidence Retrieval
+↓
+Differential Diagnosis
+↓
+Recommended Investigations
+↓
+Management Support
+↓
+Safety Review
+↓
+Physician Review
+↓
+Final Clinical Note
+
+Primary User
+
+The primary user is the physician.
+
+The physician should be able to:
+
+* Search for a patient
+* Open the patient profile
+* Review medical history
+* Review medications
+* Review allergies
+* Review previous consultations
+* Review vital signs
+* Start a consultation
+* Record the consultation
+* View live transcription
+* Review extracted clinical information
+* Review AI-generated clinical documentation
+* Review AI-generated clinical decision support
+* Edit AI content
+* Accept recommendations
+* Reject recommendations
+* Modify recommendations
+* Finalize the clinical note
+* Sign the consultation
+
+Supporting Users
+
+Nurse
+
+Responsible for entering or updating:
+
+* Vital signs
+* Height
+* Weight
+* Blood pressure
+* Temperature
+* Pulse
+* Oxygen saturation
+* Respiratory rate
+
+Clinical Administrator
+
+Responsible for:
+
+* Departments
+* Specialties
+* Physicians
+* Clinical workflows
+* Guideline libraries
+* System configuration
+
+System Administrator
+
+Responsible for:
+
+* Users
+* Roles
+* Permissions
+* Security
+* Integrations
+* Technical configuration
+
+Clinical Governance Team
+
+Responsible for:
+
+* AI performance
+* Clinical safety
+* Model validation
+* Guideline management
+* AI incidents
+* Physician overrides
+* AI quality monitoring
+
+Patient Information
+
+The patient profile should support:
+
+Demographics
+
+* Patient ID
+* MRN
+* Full name
+* Date of birth
+* Gender
+* Nationality
+* Contact information
+
+Basic Measurements
+
+* Height
+* Weight
+* BMI
+* Blood pressure
+* Pulse
+* Temperature
+* Respiratory rate
+* Oxygen saturation
+
+Medical Information
+
+* Allergies
+* Current medications
+* Chronic diseases
+* Previous diagnoses
+* Previous surgeries
+* Family history
+* Social history
+* Smoking status
+* Relevant lifestyle information
+
+Consultation
+
+Each consultation should contain:
+
+* Consultation ID
+* Patient
+* Physician
+* Department
+* Specialty
+* Date/time
+* Reason for visit
+* Consent
+* Audio session
+* Transcript
+* Clinical extraction
+* AI analysis
+* Physician review
+* Final clinical note
+* Audit trail
+
+Audio
+
+The initial system should support conversation capture using:
+
+* Physician microphone
+* Patient/room microphone
+
+The architecture should support speaker diarization.
+
+A standard microphone should NOT be considered a medical stethoscope.
+
+Future versions may integrate:
+
+* Digital stethoscope
+* ECG
+* Laboratory systems
+* Imaging
+* Other medical devices
+
+AI Medical Scribe
+
+Phase 1 should focus on:
+
+* Automatic transcription
+* Speaker identification
+* Clinical information extraction
+* Medical summarization
+* SOAP note generation
+* Physician review
+* Physician editing
+* Final clinical note
+* Audit trail
+
+The AI must never invent information.
+
+If the patient did not mention something, the system must classify it as unknown rather than assuming it is negative.
+
+Clinical Decision Support
+
+Phase 2 should introduce:
+
+* Differential diagnosis
+* Missing clinical information
+* Follow-up questions
+* Investigation recommendations
+* Evidence retrieval
+* Clinical guideline retrieval
+* Red-flag detection
+
+Recommendations must be presented as decision support for the physician.
+
+Clinical Management Support
+
+Phase 3 should introduce:
+
+* Evidence-based management options
+* Medication safety
+* Contraindication checks
+* Drug interaction checks
+* Follow-up recommendations
+* Monitoring recommendations
+
+The physician remains responsible for the final decision.
+
+Multimodal AI
+
+Phase 4 should support:
+
+* Digital stethoscope data
+* ECG
+* Laboratory results
+* Medical imaging
+* Longitudinal patient records
+* Other structured and unstructured clinical information
+
+Potential interoperability standards include:
+
+* HL7
+* FHIR
+* DICOM
+
+Clinical Evidence
+
+The long-term clinical knowledge layer should use trusted and approved clinical sources.
+
+Potential sources include:
+
+* WHO
+* NICE
+* AHA/ACC
+* ESC
+* ADA
+* IDSA
+* GOLD
+* GINA
+* CDC
+* Recognized medical specialty organizations
+* Institution-approved clinical protocols
+
+The system should use Retrieval Augmented Generation (RAG).
+
+Clinical recommendations should be traceable to their evidence where possible.
+
+AI Governance
+
+The platform must maintain:
+
+* Model version
+* Prompt version
+* Knowledge-base version
+* Guideline version
+* AI output
+* Physician modification
+* Final physician decision
+* Timestamp
+
+Security and Privacy
+
+Patient information must be treated as highly sensitive.
+
+The system must support:
+
+* Encryption
+* RBAC
+* Audit trails
+* Secure authentication
+* Least-privilege access
+* Secure storage
+* Data retention policies
+* Consent management
+
+The system should be designed with regulatory readiness for healthcare deployment.
+
+Product Philosophy
+
+MediScribe AI is not intended to replace doctors.
+
+It is intended to make physicians faster, better informed, and less burdened by documentation.
+
+The fundamental product principle is:
+
+AI recommends. Physician decides.

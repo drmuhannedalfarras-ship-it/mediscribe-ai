@@ -1,0 +1,16 @@
+<mat-toolbar color="primary" class="nav-toolbar">
+  <span class="brand">MediScribe AI</span>
+  <nav>
+    <a mat-button routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+    <a mat-button routerLink="/patients" routerLinkActive="active">Patients</a>
+    <a mat-button routerLink="/consultations" routerLinkActive="active">Consultations</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="user-name" *ngIf="currentUser$ | async as user">
+    {{ user.firstName }} {{ user.lastName }}
+  </span>
+  <button mat-button (click)="logout()">
+    <mat-icon>logout</mat-icon>
+    Logout
+  </button>
+</mat-toolbar>

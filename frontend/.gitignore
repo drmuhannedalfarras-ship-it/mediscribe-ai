@@ -1,0 +1,16 @@
+# Dependencies
+/node_modules
+
+# Build output
+/dist
+/out-tsc
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+.angular/cache
+.sass-cache/
+npm-debug.log
+yarn-error.log

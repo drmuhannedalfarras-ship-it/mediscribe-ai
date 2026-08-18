@@ -1,0 +1,29 @@
+<ng-container *ngIf="patient; else loadingState">
+  <div class="page-header">
+    <h1>{{ patient.fullName }}</h1>
+    <div>
+      <a mat-raised-button color="primary" [routerLink]="['/consultations/new']" [queryParams]="{ patientId: patient.id }">
+        New Consultation
+      </a>
+      <button mat-button color="warn" (click)="deletePatient()">Delete</button>
+    </div>
+  </div>
+
+  <mat-card>
+    <mat-card-content>
+      <p><strong>MRN:</strong> {{ patient.mrn }}</p>
+      <p><strong>Date of birth:</strong> {{ patient.dateOfBirth | date }} ({{ patient.age }} years)</p>
+      <p><strong>Gender:</strong> {{ patient.gender }}</p>
+      <p><strong>Status:</strong> {{ patient.status }}</p>
+      <p *ngIf="patient.email"><strong>Email:</strong> {{ patient.email }}</p>
+      <p *ngIf="patient.phoneNumber"><strong>Phone:</strong> {{ patient.phoneNumber }}</p>
+      <p *ngIf="patient.address"><strong>Address:</strong> {{ patient.address }}, {{ patient.city }}, {{ patient.country }}</p>
+      <p *ngIf="patient.bloodType"><strong>Blood type:</strong> {{ patient.bloodType }}</p>
+    </mat-card-content>
+  </mat-card>
+</ng-container>
+
+<ng-template #loadingState>
+  <p *ngIf="loading">Loading...</p>
+  <p *ngIf="!loading">Patient not found.</p>
+</ng-template>

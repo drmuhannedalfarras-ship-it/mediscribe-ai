@@ -1,0 +1,123 @@
+<ng-container *ngIf="consultation; else loadingState">
+  <div class="page-header">
+    <h1>{{ consultation.reasonForVisit }}</h1>
+    <div>
+      <button
+        mat-raised-button
+        color="primary"
+        [disabled]="actionPending || consultation.status !== 'SCHEDULED'"
+        (click)="startConsultation()"
+      >
+        Start
+      </button>
+      <button
+        mat-button
+        color="warn"
+        [disabled]="actionPending || consultation.status === 'CANCELLED'"
+        (click)="cancelConsultation()"
+      >
+        Cancel
+      </button>
+    </div>
+  </div>
+
+  <mat-card>
+    <mat-card-content>
+      <p><strong>Status:</strong> {{ consultation.status }}</p>
+      <p><strong>Patient ID:</strong> {{ consultation.patientId }}</p>
+      <p><strong>Physician ID:</strong> {{ consultation.physicianId }}</p>
+      <p *ngIf="consultation.department"><strong>Department:</strong> {{ consultation.department }}</p>
+      <p *ngIf="consultation.specialty"><strong>Specialty:</strong> {{ consultation.specialty }}</p>
+      <p *ngIf="consultation.consultationDate">
+        <strong>Consultation date:</strong> {{ consultation.consultationDate | date: 'short' }}
+      </p>
+      <p><strong>Created:</strong> {{ consultation.createdAt | date: 'short' }}</p>
+    </mat-card-content>
+  </mat-card>
+
+  <mat-card *ngIf="showRecordingCard" class="recording-card">
+    <mat-card-header>
+      <mat-card-title>Recording &amp; Transcript</mat-card-title>
+    </mat-card-header>
+    <mat-card-content>
+      <ng-container *ngIf="!isReviewStage">
+        <ng-container *ngIf="!hasConsent">
+          <p>Recording requires the patient's consent.</p>
+          <button mat-raised-button color="primary" [disabled]="consentPending" (click)="grantConsent()">
+            Grant Recording Consent
+          </button>
+          <p *ngIf="consentError" class="error-text">{{ consentError }}</p>
+        </ng-container>
+
+        <ng-container *ngIf="hasConsent">
+          <div *ngIf="recordingState === 'idle'">
+            <button mat-raised-button color="primary" (click)="startRecording()">
+              Start Recording
+            </button>
+            <p class="hint-text">Recording must be at least 10 seconds long.</p>
+          </div>
+
+          <div *ngIf="recordingState === 'recording'" class="recording-live">
+            <span class="recording-dot"></span>
+            <span>Recording... {{ audioRecorder.elapsedSeconds() }}s</span>
+            <button mat-raised-button color="warn" (click)="stopRecording()">Stop Recording</button>
+          </div>
+
+          <div *ngIf="recordingState === 'uploading'" class="recording-live">
+            <mat-spinner diameter="20"></mat-spinner>
+            <span>Uploading &amp; transcribing...</span>
+          </div>
+
+          <div *ngIf="recordingState === 'error'" class="error-text">
+            {{ recordingError }}
+            <button mat-button (click)="recordingState = 'idle'">Try again</button>
+          </div>
+
+          <div *ngIf="recordingState === 'done'">
+            <button mat-button color="primary" (click)="playAudio()">Play Recording</button>
+            <audio *ngIf="audioObjectUrl" [src]="audioObjectUrl" controls></audio>
+
+            <div *ngIf="transcript && transcript.length" class="transcript">
+              <p *ngFor="let segment of transcript">
+                <strong>{{ segment.speaker }}:</strong> {{ segment.text }}
+              </p>
+            </div>
+          </div>
+        </ng-container>
+      </ng-container>
+
+      <ng-container *ngIf="isReviewStage">
+        <div *ngIf="transcript && transcript.length" class="transcript">
+          <p *ngFor="let segment of transcript">
+            <strong>{{ segment.speaker }}:</strong> {{ segment.text }}
+          </p>
+        </div>
+        <p *ngIf="!transcript || !transcript.length" class="hint-text">No transcript available.</p>
+
+        <div *ngIf="consultation.status === 'AI_REVIEW_READY'">
+          <button mat-raised-button color="primary" [disabled]="actionPending" (click)="beginReview()">
+            Begin Review
+          </button>
+        </div>
+
+        <div *ngIf="consultation.status === 'PHYSICIAN_REVIEW'">
+          <button mat-raised-button color="primary" [disabled]="actionPending" (click)="finalizeConsultation()">
+            Finalize
+          </button>
+          <button mat-button color="warn" [disabled]="actionPending" (click)="sendBackForRerecording()">
+            Send Back for Re-recording
+          </button>
+        </div>
+
+        <p *ngIf="consultation.status === 'FINALIZED' || consultation.status === 'AMENDED'">
+          <strong>Finalized:</strong> {{ consultation.finalizedAt | date: 'short' }}
+        </p>
+      </ng-container>
+    </mat-card-content>
+  </mat-card>
+</ng-container>
+
+<ng-template #loadingState>
+  <p *ngIf="loading">Loading...</p>
+  <p *ngIf="!loading">Consultation not found.</p>
+</ng-template>

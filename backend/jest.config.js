@@ -1,0 +1,45 @@
+module.exports = {
+  moduleFileExtensions: ['js', 'json', 'ts'],
+  rootDir: 'src',
+  testRegex: '.*\\.spec\\.ts$',
+  transform: {
+    '^.+\\.(t|j)s$': 'ts-jest',
+  },
+  collectCoverageFrom: [
+    '**/*.(t|j)s',
+    '!**/*.spec.ts',
+    '!**/*.interface.ts',
+    '!**/node_modules/**',
+  ],
+  coverageDirectory: '../coverage',
+  testEnvironment: 'node',
+  roots: ['<rootDir>', '<rootDir>/../'],
+  moduleNameMapper: {
+    '^@entities/(.*)$': '<rootDir>/entities/$1',
+    '^@dto/(.*)$': '<rootDir>/dto/$1',
+    '^@modules/(.*)$': '<rootDir>/modules/$1',
+    '^@services/(.*)$': '<rootDir>/services/$1',
+    '^@guards/(.*)$': '<rootDir>/guards/$1',
+    '^@interceptors/(.*)$': '<rootDir>/interceptors/$1',
+    '^@decorators/(.*)$': '<rootDir>/decorators/$1',
+    '^@filters/(.*)$': '<rootDir>/filters/$1',
+    '^@config/(.*)$': '<rootDir>/config/$1',
+    '^@utils/(.*)$': '<rootDir>/utils/$1',
+    '^@constants/(.*)$': '<rootDir>/constants/$1',
+  },
+  coveragePathIgnorePatterns: [
+    '/node_modules/',
+    '/test/',
+    '/dist/',
+    '.spec.ts',
+    '.interface.ts',
+  ],
+  coverageThreshold: {
+    global: {
+      branches: 70,
+      functions: 70,
+      lines: 70,
+      statements: 70,
+    },
+  },
+};
