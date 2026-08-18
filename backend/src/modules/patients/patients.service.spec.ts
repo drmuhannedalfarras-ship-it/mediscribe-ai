@@ -2,348 +2,209 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { PatientsService } from './patients.service';
-import { Patient } from '@entities/patient.entity';
-import { TestDataGenerator, MockDataFactory } from '@common/test/test.utils';
+import { Patient, PatientStatus } from '@entities/patient.entity';
+
+function mockQueryBuilder(result: [any[], number]) {
+  return {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    leftJoinAndSelect: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    getManyAndCount: jest.fn().mockResolvedValue(result),
+  };
+}
 
 describe('PatientsService', () => {
   let service: PatientsService;
-  let mockRepository: any;
-
-  const mockPatientData = MockDataFactory.createMockPatient();
+  let mockPatientRepository: any;
 
   beforeEach(async () => {
-    mockRepository = {
-      find: jest.fn(),
-      findOne: jest.fn(),
+    mockPatientRepository = {
+      create: jest.fn((data) => data),
       save: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-      count: jest.fn(),
-      createQueryBuilder: jest.fn(() => ({
-        where: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getMany: jest.fn(),
-        getCount: jest.fn(),
-      })),
+      findOne: jest.fn(),
+      findAndCount: jest.fn(),
+      softRemove: jest.fn(),
+      createQueryBuilder: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PatientsService,
-        {
-          provide: getRepositoryToken(Patient),
-          useValue: mockRepository,
-        },
+        { provide: getRepositoryToken(Patient), useValue: mockPatientRepository },
       ],
     }).compile();
 
     service = module.get<PatientsService>(PatientsService);
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
+  describe('createPatient', () => {
+    const validDto = {
+      firstName: '  Jane  ',
+      lastName: '  Doe  ',
+      gender: 'FEMALE',
+      dateOfBirth: '1990-01-01',
+      email: 'JANE@EXAMPLE.COM',
+    } as any;
+
+    it('should create a patient with a generated MRN and trimmed name', async () => {
+      mockPatientRepository.save.mockImplementation((p: any) => Promise.resolve(p));
+
+      const result = await service.createPatient(validDto);
+
+      expect(result.firstName).toBe('Jane');
+      expect(result.lastName).toBe('Doe');
+      expect(result.email).toBe('jane@example.com');
+      expect(result.mrn).toMatch(/^\d{12}$/);
+      expect(result.patientId).toBe(`P-${result.mrn}`);
+      expect(result.status).toBe(PatientStatus.ACTIVE);
+    });
+
+    it('should throw BadRequestException if first or last name is missing', async () => {
+      await expect(
+        service.createPatient({ ...validDto, firstName: '' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException if gender is missing', async () => {
+      await expect(
+        service.createPatient({ ...validDto, gender: undefined }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException if date of birth is missing', async () => {
+      await expect(
+        service.createPatient({ ...validDto, dateOfBirth: undefined }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException for an implausible date of birth', async () => {
+      await expect(
+        service.createPatient({ ...validDto, dateOfBirth: '1800-01-01' }),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 
-  describe('createPatient', () => {
-    it('should create a new patient', async () => {
-      const createDto = TestDataGenerator.generatePatientData();
-      mockRepository.save.mockResolvedValue(mockPatientData);
+  describe('getAllPatients', () => {
+    it('should return paginated patients', async () => {
+      const patients = [{ id: 'p1' }];
+      mockPatientRepository.createQueryBuilder.mockReturnValue(
+        mockQueryBuilder([patients, 1]),
+      );
 
-      const result = await service.createPatient(createDto);
+      const result = await service.getAllPatients(0, 20);
 
-      expect(mockRepository.save).toHaveBeenCalledWith(expect.objectContaining(createDto));
-      expect(result).toEqual(mockPatientData);
-    });
-
-    it('should validate required fields', async () => {
-      const invalidDto = { fullName: 'Test' }; // Missing required fields
-
-      mockRepository.save.mockRejectedValue(new Error('Validation error'));
-
-      await expect(service.createPatient(invalidDto))
-        .rejects
-        .toThrow();
-    });
-
-    it('should calculate BMI on patient creation', async () => {
-      const createDto = TestDataGenerator.generatePatientData({
-        height: 180,
-        weight: 80,
-      });
-
-      const expectedBmi = 80 / ((180 / 100) ** 2);
-      mockRepository.save.mockResolvedValue({
-        ...mockPatientData,
-        bmi: expectedBmi,
-      });
-
-      const result = await service.createPatient(createDto);
-
-      expect(result.bmi).toBe(expectedBmi);
+      expect(result.data).toBe(patients);
+      expect(result.total).toBe(1);
     });
   });
 
   describe('getPatientById', () => {
-    it('should return patient when found', async () => {
-      mockRepository.findOne.mockResolvedValue(mockPatientData);
+    it('should return the patient when found', async () => {
+      const patient = { id: 'p1' };
+      mockPatientRepository.findOne.mockResolvedValue(patient);
 
-      const result = await service.getPatientById('patient-001');
+      const result = await service.getPatientById('p1');
 
-      expect(result).toEqual(mockPatientData);
-      expect(mockRepository.findOne).toHaveBeenCalledWith({
-        where: { id: 'patient-001' },
-      });
+      expect(result).toBe(patient);
     });
 
-    it('should throw NotFoundException when patient not found', async () => {
-      mockRepository.findOne.mockResolvedValue(null);
+    it('should throw NotFoundException when not found', async () => {
+      mockPatientRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.getPatientById('invalid-id'))
-        .rejects
-        .toThrow(NotFoundException);
-    });
-  });
-
-  describe('updatePatient', () => {
-    it('should update patient data', async () => {
-      const updateDto = { fullName: 'Updated Name', weight: 85 };
-      mockRepository.findOne.mockResolvedValue(mockPatientData);
-      mockRepository.save.mockResolvedValue({
-        ...mockPatientData,
-        ...updateDto,
-      });
-
-      const result = await service.updatePatient('patient-001', updateDto);
-
-      expect(mockRepository.save).toHaveBeenCalled();
-      expect(result.fullName).toBe('Updated Name');
-    });
-
-    it('should recalculate BMI when weight or height changes', async () => {
-      const updateDto = { weight: 85, height: 175 };
-      mockRepository.findOne.mockResolvedValue(mockPatientData);
-
-      const expectedBmi = 85 / ((175 / 100) ** 2);
-      mockRepository.save.mockResolvedValue({
-        ...mockPatientData,
-        ...updateDto,
-        bmi: expectedBmi,
-      });
-
-      const result = await service.updatePatient('patient-001', updateDto);
-
-      expect(result.bmi).toBe(expectedBmi);
-    });
-
-    it('should throw NotFoundException if patient does not exist', async () => {
-      mockRepository.findOne.mockResolvedValue(null);
-
-      await expect(service.updatePatient('invalid-id', { fullName: 'Test' }))
-        .rejects
-        .toThrow(NotFoundException);
-    });
-  });
-
-  describe('deletePatient', () => {
-    it('should soft delete a patient', async () => {
-      mockRepository.findOne.mockResolvedValue(mockPatientData);
-      mockRepository.save.mockResolvedValue({
-        ...mockPatientData,
-        deletedAt: new Date(),
-      });
-
-      await service.deletePatient('patient-001');
-
-      expect(mockRepository.save).toHaveBeenCalled();
-    });
-
-    it('should throw NotFoundException if patient does not exist', async () => {
-      mockRepository.findOne.mockResolvedValue(null);
-
-      await expect(service.deletePatient('invalid-id'))
-        .rejects
-        .toThrow(NotFoundException);
-    });
-  });
-
-  describe('listPatients', () => {
-    it('should return paginated patient list', async () => {
-      const patients = [mockPatientData];
-      const total = 1;
-
-      mockRepository.createQueryBuilder().getMany.mockResolvedValue(patients);
-      mockRepository.createQueryBuilder().getCount.mockResolvedValue(total);
-
-      const result = await service.listPatients(1, 10, 'fullName', 'ASC');
-
-      expect(Array.isArray(result.data)).toBe(true);
-      expect(result.pagination.total).toBe(total);
-    });
-
-    it('should filter patients by search term', async () => {
-      mockRepository.createQueryBuilder().getMany.mockResolvedValue([mockPatientData]);
-      mockRepository.createQueryBuilder().getCount.mockResolvedValue(1);
-
-      const result = await service.listPatients(1, 10, 'fullName', 'ASC', 'test');
-
-      expect(result.data).toHaveLength(1);
-    });
-
-    it('should sort patients by specified field', async () => {
-      const queryBuilder = mockRepository.createQueryBuilder();
-      queryBuilder.getMany.mockResolvedValue([mockPatientData]);
-      queryBuilder.getCount.mockResolvedValue(1);
-
-      await service.listPatients(1, 10, 'dateOfBirth', 'DESC');
-
-      expect(queryBuilder.orderBy).toHaveBeenCalledWith(
-        expect.stringContaining('dateOfBirth'),
-        'DESC',
+      await expect(service.getPatientById('missing')).rejects.toThrow(
+        NotFoundException,
       );
     });
   });
 
+  describe('getPatientByMRN', () => {
+    it('should return null when no patient matches', async () => {
+      mockPatientRepository.findOne.mockResolvedValue(null);
+
+      const result = await service.getPatientByMRN('nope');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('updatePatient', () => {
+    it('should update only provided fields', async () => {
+      const patient = { id: 'p1', firstName: 'Old', lastName: 'Name', email: 'old@x.com' };
+      mockPatientRepository.findOne.mockResolvedValue(patient);
+      mockPatientRepository.save.mockImplementation((p: any) => Promise.resolve(p));
+
+      const result = await service.updatePatient('p1', { firstName: 'New' } as any);
+
+      expect(result.firstName).toBe('New');
+      expect(result.lastName).toBe('Name');
+    });
+
+    it('should throw NotFoundException if the patient does not exist', async () => {
+      mockPatientRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.updatePatient('missing', {} as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('searchPatients', () => {
-    it('should search patients by MRN', async () => {
-      mockRepository.findOne.mockResolvedValue(mockPatientData);
+    it('should build a filtered query and return results', async () => {
+      const qb = mockQueryBuilder([[{ id: 'p1' }], 1]);
+      mockPatientRepository.createQueryBuilder.mockReturnValue(qb);
 
-      const result = await service.searchPatients('byMrn', 'MRN-001');
+      const result = await service.searchPatients({ lastName: 'Doe' } as any);
 
-      expect(mockRepository.findOne).toHaveBeenCalled();
-      expect(result).toEqual(mockPatientData);
-    });
-
-    it('should search patients by email', async () => {
-      mockRepository.find.mockResolvedValue([mockPatientData]);
-
-      const result = await service.searchPatients('byEmail', 'patient@example.com');
-
-      expect(mockRepository.find).toHaveBeenCalled();
-      expect(Array.isArray(result)).toBe(true);
-    });
-
-    it('should throw error for invalid search type', async () => {
-      await expect(service.searchPatients('invalid', 'value'))
-        .rejects
-        .toThrow(BadRequestException);
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'patient.lastName ILIKE :lastName',
+        { lastName: '%Doe%' },
+      );
+      expect(result.total).toBe(1);
     });
   });
 
-  describe('getPatientVitals', () => {
-    it('should return patient vital signs', async () => {
-      const vitals = TestDataGenerator.generateVitalSigns('patient-001');
-      const mockVitalRepository = { find: jest.fn().mockResolvedValue([vitals]) };
+  describe('deletePatient', () => {
+    it('should soft-remove the patient', async () => {
+      const patient = { id: 'p1', patientId: 'P-1' };
+      mockPatientRepository.findOne.mockResolvedValue(patient);
 
-      // This would require injecting VitalSigns repository
-      const result = [vitals];
+      await service.deletePatient('p1');
 
-      expect(Array.isArray(result)).toBe(true);
-      expect(result[0].systolic).toBe(130);
+      expect(mockPatientRepository.softRemove).toHaveBeenCalledWith(patient);
     });
   });
 
-  describe('getPatientAllergies', () => {
-    it('should return patient allergies', async () => {
-      const allergies = [
-        {
-          id: 'allergy-001',
-          allergen: 'Penicillin',
-          reaction: 'Rash',
-          severity: 'moderate',
-        },
-      ];
-
-      const result = allergies;
-
-      expect(Array.isArray(result)).toBe(true);
-      expect(result[0].allergen).toBe('Penicillin');
-    });
-  });
-
-  describe('getPatientMedications', () => {
-    it('should return active medications for patient', async () => {
-      const medications = [
-        {
-          id: 'med-001',
-          medicationName: 'Aspirin',
-          dose: '325mg',
-          status: 'active',
-        },
-      ];
-
-      const result = medications.filter((m) => m.status === 'active');
-
-      expect(Array.isArray(result)).toBe(true);
-      expect(result[0].medicationName).toBe('Aspirin');
-    });
-  });
-
-  describe('getPatientConditions', () => {
-    it('should return patient medical conditions', async () => {
-      const conditions = [
-        {
-          id: 'cond-001',
-          condition: 'Hypertension',
-          status: 'active',
-          dateOfDiagnosis: new Date('2020-01-01'),
-        },
-      ];
-
-      const result = conditions;
-
-      expect(Array.isArray(result)).toBe(true);
-      expect(result[0].condition).toBe('Hypertension');
-    });
-  });
-
-  describe('validatePatientData', () => {
-    it('should validate all required patient fields', () => {
-      const validPatient = TestDataGenerator.generatePatientData();
-      const isValid = service.validatePatientData(validPatient);
-
-      expect(isValid).toBe(true);
-    });
-
-    it('should reject invalid email format', () => {
-      const invalidPatient = {
-        ...TestDataGenerator.generatePatientData(),
-        email: 'invalid-email',
+  describe('getPatientVitalSigns', () => {
+    it('should sort and paginate the patient vital signs relation', async () => {
+      const patient = {
+        id: 'p1',
+        vitalSigns: [
+          { measuredAt: '2026-01-01', value: 'old' },
+          { measuredAt: '2026-02-01', value: 'new' },
+        ],
       };
+      mockPatientRepository.findOne.mockResolvedValue(patient);
 
-      const isValid = service.validatePatientData(invalidPatient);
+      const result = await service.getPatientVitalSigns('p1', 0, 20);
 
-      expect(isValid).toBe(false);
-    });
-
-    it('should reject invalid date format', () => {
-      const invalidPatient = {
-        ...TestDataGenerator.generatePatientData(),
-        dateOfBirth: 'invalid-date',
-      };
-
-      const isValid = service.validatePatientData(invalidPatient);
-
-      expect(isValid).toBe(false);
+      expect(result.total).toBe(2);
+      expect(result.data[0].value).toBe('new');
     });
   });
 
-  describe('checkDuplicatePatient', () => {
-    it('should detect duplicate by MRN', async () => {
-      mockRepository.findOne.mockResolvedValue(mockPatientData);
+  describe('getActivePatients', () => {
+    it('should filter by ACTIVE status', async () => {
+      mockPatientRepository.findAndCount.mockResolvedValue([[{ id: 'p1' }], 1]);
 
-      const isDuplicate = await service.checkDuplicatePatient('MRN-001');
+      const result = await service.getActivePatients(0, 20);
 
-      expect(isDuplicate).toBe(true);
-    });
-
-    it('should return false for unique MRN', async () => {
-      mockRepository.findOne.mockResolvedValue(null);
-
-      const isDuplicate = await service.checkDuplicatePatient('MRN-NEW');
-
-      expect(isDuplicate).toBe(false);
+      expect(mockPatientRepository.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { status: PatientStatus.ACTIVE } }),
+      );
+      expect(result.total).toBe(1);
     });
   });
 });

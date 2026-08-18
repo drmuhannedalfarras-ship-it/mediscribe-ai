@@ -1,204 +1,145 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, BadRequestException } from '@nestjs/common';
-import * as request from 'supertest';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { User, UserStatus } from '@entities/user.entity';
 
 describe('AuthController', () => {
-  let app: INestApplication;
-  let authService: AuthService;
-
-  const mockUser: Partial<User> = {
-    id: '1',
-    email: 'test@example.com',
-    firstName: 'Test',
-    lastName: 'User',
-    status: UserStatus.ACTIVE,
-    getRoleNames: () => ['PHYSICIAN'],
-  };
+  let controller: AuthController;
+  let mockAuthService: any;
 
   beforeEach(async () => {
-    const mockAuthService = {
+    mockAuthService = {
       register: jest.fn(),
       login: jest.fn(),
       getUserById: jest.fn(),
       changePassword: jest.fn(),
-      validateUser: jest.fn(),
+      generateToken: jest.fn().mockReturnValue('refreshed-token'),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
-      providers: [
-        {
-          provide: AuthService,
-          useValue: mockAuthService,
-        },
-      ],
+      providers: [{ provide: AuthService, useValue: mockAuthService }],
     }).compile();
 
-    app = module.createNestApplication();
-    await app.init();
-
-    authService = module.get<AuthService>(AuthService);
+    controller = module.get<AuthController>(AuthController);
   });
 
-  afterEach(async () => {
-    await app.close();
-  });
+  describe('register', () => {
+    it('should strip the password hash from the response', async () => {
+      mockAuthService.register.mockResolvedValue({
+        id: 'user-001',
+        email: 'new@example.com',
+        passwordHash: 'secret-hash',
+      });
 
-  describe('POST /auth/register', () => {
-    it('should register a new user', async () => {
-      const createUserDto = {
-        email: 'newuser@example.com',
+      const result = await controller.register({
+        email: 'new@example.com',
         password: 'SecurePassword123',
-        firstName: 'New',
-        lastName: 'User',
-      };
-
-      jest.spyOn(authService, 'register').mockResolvedValue({
-        ...mockUser,
-        email: createUserDto.email,
       } as any);
 
-      const response = await request(app.getHttpServer())
-        .post('/auth/register')
-        .send(createUserDto)
-        .expect(201);
-
-      expect(response.body.statusCode).toBe(201);
-      expect(response.body.user.email).toBe(createUserDto.email);
-      expect(response.body.user.passwordHash).toBeUndefined();
+      expect(result.statusCode).toBe(201);
+      expect((result.user as any).passwordHash).toBeUndefined();
+      expect(result.user.email).toBe('new@example.com');
     });
 
-    it('should return 400 if email already exists', async () => {
-      const createUserDto = {
-        email: 'test@example.com',
-        password: 'SecurePassword123',
-        firstName: 'Test',
-        lastName: 'User',
-      };
+    it('should propagate errors from the service', async () => {
+      mockAuthService.register.mockRejectedValue(new BadRequestException('taken'));
 
-      jest
-        .spyOn(authService, 'register')
-        .mockRejectedValue(new BadRequestException('Email already registered'));
-
-      await request(app.getHttpServer())
-        .post('/auth/register')
-        .send(createUserDto)
-        .expect(400);
-    });
-
-    it('should return 400 if password is too short', async () => {
-      const createUserDto = {
-        email: 'test@example.com',
-        password: 'short',
-        firstName: 'Test',
-        lastName: 'User',
-      };
-
-      jest
-        .spyOn(authService, 'register')
-        .mockRejectedValue(
-          new BadRequestException('Password must be at least 8 characters'),
-        );
-
-      await request(app.getHttpServer())
-        .post('/auth/register')
-        .send(createUserDto)
-        .expect(400);
+      await expect(
+        controller.register({ email: 'x@x.com', password: 'x' } as any),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
-  describe('POST /auth/login', () => {
-    it('should return JWT token on successful login', async () => {
-      const loginDto = {
-        email: 'test@example.com',
-        password: 'SecurePassword123',
-      };
-
-      jest.spyOn(authService, 'login').mockResolvedValue({
-        accessToken: 'test-jwt-token',
-        user: mockUser as any,
+  describe('login', () => {
+    it('should return an access token and user without the password hash', async () => {
+      mockAuthService.login.mockResolvedValue({
+        accessToken: 'jwt-token',
         expiresIn: 86400,
+        user: { id: 'user-001', email: 'user@example.com', passwordHash: 'secret-hash' },
       });
 
-      const response = await request(app.getHttpServer())
-        .post('/auth/login')
-        .send(loginDto)
-        .expect(200);
-
-      expect(response.body.statusCode).toBe(200);
-      expect(response.body.accessToken).toBe('test-jwt-token');
-      expect(response.body.expiresIn).toBeDefined();
-    });
-
-    it('should return 401 for invalid credentials', async () => {
-      const loginDto = {
-        email: 'test@example.com',
-        password: 'WrongPassword',
-      };
-
-      jest
-        .spyOn(authService, 'login')
-        .mockRejectedValue(new BadRequestException('Invalid credentials'));
-
-      await request(app.getHttpServer())
-        .post('/auth/login')
-        .send(loginDto)
-        .expect(400);
-    });
-
-    it('should not return password hash in response', async () => {
-      const loginDto = {
-        email: 'test@example.com',
-        password: 'SecurePassword123',
-      };
-
-      jest.spyOn(authService, 'login').mockResolvedValue({
-        accessToken: 'test-jwt-token',
-        user: mockUser as any,
-        expiresIn: 86400,
+      const result = await controller.login({
+        email: 'user@example.com',
+        password: 'correct',
       });
 
-      const response = await request(app.getHttpServer())
-        .post('/auth/login')
-        .send(loginDto)
-        .expect(200);
+      expect(result.statusCode).toBe(200);
+      expect(result.accessToken).toBe('jwt-token');
+      expect((result.user as any).passwordHash).toBeUndefined();
+    });
 
-      expect(response.body.user.passwordHash).toBeUndefined();
+    it('should propagate UnauthorizedException from the service', async () => {
+      mockAuthService.login.mockRejectedValue(new UnauthorizedException('bad creds'));
+
+      await expect(
+        controller.login({ email: 'x@x.com', password: 'wrong' }),
+      ).rejects.toThrow(UnauthorizedException);
     });
   });
 
-  describe('POST /auth/change-password', () => {
-    it('should change password successfully', async () => {
-      const changePasswordDto = {
-        currentPassword: 'OldPassword123',
-        newPassword: 'NewPassword123',
-      };
+  describe('getCurrentUser', () => {
+    it('should return the current user without the password hash', async () => {
+      mockAuthService.getUserById.mockResolvedValue({
+        id: 'user-001',
+        email: 'user@example.com',
+        passwordHash: 'secret-hash',
+      });
 
-      jest.spyOn(authService, 'changePassword').mockResolvedValue(undefined);
-      jest.spyOn(authService, 'getUserById').mockResolvedValue(mockUser as any);
+      const result = await controller.getCurrentUser({ id: 'user-001' });
 
-      const response = await request(app.getHttpServer())
-        .post('/auth/change-password')
-        .set('Authorization', `Bearer test-token`)
-        .send(changePasswordDto);
-
-      // Note: Without JwtAuthGuard properly mocked, this will return 401
-      // In a real integration test, you would set up the guard properly
-      expect(response.status).toBeDefined();
+      expect(result.statusCode).toBe(200);
+      expect((result.user as any).passwordHash).toBeUndefined();
     });
   });
 
-  describe('POST /auth/logout', () => {
-    it('should logout user successfully', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/auth/logout')
-        .set('Authorization', `Bearer test-token`);
+  describe('changePassword', () => {
+    it('should call the service with the current user id', async () => {
+      mockAuthService.changePassword.mockResolvedValue(undefined);
 
-      // Note: Without JwtAuthGuard properly mocked, this will return 401
-      expect(response.status).toBeDefined();
+      const result = await controller.changePassword(
+        { id: 'user-001', email: 'user@example.com' },
+        { currentPassword: 'OldPassword123', newPassword: 'NewPassword123' },
+      );
+
+      expect(mockAuthService.changePassword).toHaveBeenCalledWith(
+        'user-001',
+        'OldPassword123',
+        'NewPassword123',
+      );
+      expect(result.statusCode).toBe(200);
+    });
+
+    it('should throw BadRequestException if either password is missing', async () => {
+      await expect(
+        controller.changePassword(
+          { id: 'user-001', email: 'user@example.com' },
+          { currentPassword: '', newPassword: '' } as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockAuthService.changePassword).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('logout', () => {
+    it('should return a success message without calling the service', async () => {
+      const result = await controller.logout({ id: 'user-001', email: 'user@example.com' });
+
+      expect(result.statusCode).toBe(200);
+    });
+  });
+
+  describe('refreshToken', () => {
+    it('should issue a new token for the current user', async () => {
+      mockAuthService.getUserById.mockResolvedValue({ id: 'user-001' });
+
+      const result = await controller.refreshToken({
+        id: 'user-001',
+        email: 'user@example.com',
+      });
+
+      expect(result.statusCode).toBe(200);
+      expect(result.accessToken).toBe('refreshed-token');
     });
   });
 });

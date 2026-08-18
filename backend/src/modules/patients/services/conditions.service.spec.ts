@@ -1,19 +1,25 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConditionsService } from './conditions.service';
-import { PatientCondition } from '@entities/patient-condition.entity';
+import { PatientCondition, ConditionStatus } from '@entities/index';
+import { Patient } from '@entities/patient.entity';
 
 describe('ConditionsService', () => {
   let service: ConditionsService;
-  let mockRepository: any;
+  let mockConditionRepository: any;
+  let mockPatientRepository: any;
 
   beforeEach(async () => {
-    mockRepository = {
+    mockConditionRepository = {
+      create: jest.fn((data) => data),
+      save: jest.fn(),
       find: jest.fn(),
       findOne: jest.fn(),
-      save: jest.fn(),
-      remove: jest.fn(),
+    };
+
+    mockPatientRepository = {
+      findOne: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -21,7 +27,11 @@ describe('ConditionsService', () => {
         ConditionsService,
         {
           provide: getRepositoryToken(PatientCondition),
-          useValue: mockRepository,
+          useValue: mockConditionRepository,
+        },
+        {
+          provide: getRepositoryToken(Patient),
+          useValue: mockPatientRepository,
         },
       ],
     }).compile();
@@ -30,254 +40,153 @@ describe('ConditionsService', () => {
   });
 
   describe('addCondition', () => {
-    it('should add new condition to patient', async () => {
-      const conditionData = {
-        patientId: 'patient-001',
-        condition: 'Hypertension',
-        status: 'active',
-        dateOfDiagnosis: new Date('2020-01-01'),
-      };
+    it('should create an active condition for an existing patient', async () => {
+      mockPatientRepository.findOne.mockResolvedValue({ id: 'patient-001' });
+      mockConditionRepository.save.mockImplementation((c: any) => Promise.resolve(c));
 
-      mockRepository.save.mockResolvedValue({ id: 'cond-001', ...conditionData });
+      const result = await service.addCondition('patient-001', '  Hypertension  ', 'I10', 'moderate');
 
-      const result = await service.addCondition(conditionData);
-
-      expect(mockRepository.save).toHaveBeenCalled();
-      expect(result.condition).toBe('Hypertension');
+      expect(result.conditionName).toBe('Hypertension');
+      expect(result.status).toBe(ConditionStatus.ACTIVE);
+      expect(mockConditionRepository.save).toHaveBeenCalled();
     });
 
-    it('should validate condition status', () => {
-      const validStatuses = ['active', 'resolved', 'chronic'];
-
-      validStatuses.forEach(status => {
-        expect(service.isValidStatus(status)).toBe(true);
-      });
+    it('should throw BadRequestException if the condition name is missing', async () => {
+      await expect(service.addCondition('patient-001', '')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
-    it('should reject invalid condition status', () => {
-      expect(service.isValidStatus('invalid-status')).toBe(false);
-    });
-  });
+    it('should throw NotFoundException if the patient does not exist', async () => {
+      mockPatientRepository.findOne.mockResolvedValue(null);
 
-  describe('getPatientConditions', () => {
-    it('should return all active conditions', async () => {
-      const conditions = [
-        { id: 'cond-001', condition: 'Hypertension', status: 'active' },
-        { id: 'cond-002', condition: 'Diabetes', status: 'active' },
-      ];
-
-      mockRepository.find.mockResolvedValue(conditions);
-
-      const result = await service.getActiveConditions('patient-001');
-
-      expect(Array.isArray(result)).toBe(true);
-      expect(result.length).toBe(2);
-    });
-
-    it('should return empty array if no conditions', async () => {
-      mockRepository.find.mockResolvedValue([]);
-
-      const result = await service.getPatientConditions('patient-001');
-
-      expect(Array.isArray(result)).toBe(true);
-      expect(result.length).toBe(0);
-    });
-  });
-
-  describe('resolveCondition', () => {
-    it('should mark condition as resolved', async () => {
-      const condition = {
-        id: 'cond-001',
-        condition: 'Bronchitis',
-        status: 'active',
-      };
-
-      mockRepository.findOne.mockResolvedValue(condition);
-      mockRepository.save.mockResolvedValue({
-        ...condition,
-        status: 'resolved',
-        resolvedAt: new Date(),
-      });
-
-      const result = await service.resolveCondition('cond-001');
-
-      expect(result.status).toBe('resolved');
-    });
-
-    it('should throw NotFoundException if condition not found', async () => {
-      mockRepository.findOne.mockResolvedValue(null);
-
-      await expect(service.resolveCondition('invalid-id')).rejects.toThrow(
+      await expect(service.addCondition('missing', 'Asthma')).rejects.toThrow(
         NotFoundException,
       );
     });
   });
 
-  describe('getComorbidities', () => {
-    it('should return patient comorbidities', async () => {
-      const conditions = [
-        { condition: 'Hypertension' },
-        { condition: 'Diabetes' },
-        { condition: 'CAD' },
-      ];
+  describe('getActivePatientConditions', () => {
+    it('should return only active conditions', async () => {
+      mockPatientRepository.findOne.mockResolvedValue({ id: 'patient-001' });
+      const conditions = [{ id: 'c1', status: ConditionStatus.ACTIVE }];
+      mockConditionRepository.find.mockResolvedValue(conditions);
 
-      mockRepository.find.mockResolvedValue(conditions);
+      const result = await service.getActivePatientConditions('patient-001');
 
-      const result = await service.getComorbidities('patient-001');
-
-      expect(result.length).toBe(3);
-    });
-
-    it('should identify major comorbidities', async () => {
-      const conditions = [
-        { condition: 'Hypertension', severity: 'high' },
-        { condition: 'Diabetes', severity: 'high' },
-        { condition: 'Anxiety', severity: 'low' },
-      ];
-
-      mockRepository.find.mockResolvedValue(conditions);
-
-      const major = conditions.filter(c => c.severity === 'high');
-
-      expect(major.length).toBe(2);
-    });
-  });
-
-  describe('updateConditionStatus', () => {
-    it('should update condition status', async () => {
-      const condition = {
-        id: 'cond-001',
-        condition: 'Hypertension',
-        status: 'active',
-      };
-
-      mockRepository.findOne.mockResolvedValue(condition);
-      mockRepository.save.mockResolvedValue({
-        ...condition,
-        status: 'resolved',
+      expect(result).toBe(conditions);
+      expect(mockConditionRepository.find).toHaveBeenCalledWith({
+        where: { patientId: 'patient-001', status: ConditionStatus.ACTIVE },
+        order: { onsetDate: 'DESC' },
       });
+    });
 
-      const result = await service.updateStatus('cond-001', 'resolved');
+    it('should throw NotFoundException if the patient does not exist', async () => {
+      mockPatientRepository.findOne.mockResolvedValue(null);
 
-      expect(result.status).toBe('resolved');
+      await expect(service.getActivePatientConditions('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
-  describe('getConditionHistory', () => {
-    it('should return condition timeline', async () => {
-      const conditions = [
-        {
-          condition: 'Hypertension',
-          dateOfDiagnosis: new Date('2018-01-01'),
-          status: 'active',
-        },
-        {
-          condition: 'Bronchitis',
-          dateOfDiagnosis: new Date('2022-03-15'),
-          status: 'resolved',
-        },
-      ];
+  describe('getPatientConditions', () => {
+    it('should return all conditions regardless of status', async () => {
+      mockPatientRepository.findOne.mockResolvedValue({ id: 'patient-001' });
+      const conditions = [{ id: 'c1' }, { id: 'c2' }];
+      mockConditionRepository.find.mockResolvedValue(conditions);
 
-      mockRepository.find.mockResolvedValue(conditions);
+      const result = await service.getPatientConditions('patient-001');
 
-      const result = await service.getConditionHistory('patient-001');
-
-      expect(Array.isArray(result)).toBe(true);
+      expect(result).toBe(conditions);
     });
   });
 
-  describe('checkHighRiskConditions', () => {
-    it('should identify high-risk conditions', async () => {
-      const highRiskConditions = [
-        'Myocardial Infarction',
-        'Stroke',
-        'Cancer',
-        'Heart Failure',
-      ];
+  describe('updateCondition', () => {
+    it('should update only the provided fields', async () => {
+      const condition = {
+        id: 'c1',
+        conditionName: 'Old name',
+        icdCode: 'X00',
+        severity: 'mild',
+      };
+      mockConditionRepository.findOne.mockResolvedValue(condition);
+      mockConditionRepository.save.mockImplementation((c: any) => Promise.resolve(c));
 
-      const conditions = [
-        { condition: 'Hypertension' },
-        { condition: 'Myocardial Infarction' },
-      ];
+      const result = await service.updateCondition('c1', 'patient-001', 'New name');
 
-      mockRepository.find.mockResolvedValue(conditions);
+      expect(result.conditionName).toBe('New name');
+      expect(result.icdCode).toBe('X00');
+    });
 
-      const result = await service.hasHighRiskCondition('patient-001');
+    it('should throw NotFoundException if the condition does not exist', async () => {
+      mockConditionRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.updateCondition('missing', 'patient-001', 'x'),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('resolveCondition', () => {
+    it('should set status to RESOLVED and stamp a resolution date', async () => {
+      const condition = { id: 'c1', status: ConditionStatus.ACTIVE, resolutionDate: null };
+      mockConditionRepository.findOne.mockResolvedValue(condition);
+      mockConditionRepository.save.mockImplementation((c: any) => Promise.resolve(c));
+
+      const result = await service.resolveCondition('c1', 'patient-001');
+
+      expect(result.status).toBe(ConditionStatus.RESOLVED);
+      expect(result.resolutionDate).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('markRemission', () => {
+    it('should set status to REMISSION', async () => {
+      const condition = { id: 'c1', status: ConditionStatus.ACTIVE };
+      mockConditionRepository.findOne.mockResolvedValue(condition);
+      mockConditionRepository.save.mockImplementation((c: any) => Promise.resolve(c));
+
+      const result = await service.markRemission('c1', 'patient-001');
+
+      expect(result.status).toBe(ConditionStatus.REMISSION);
+    });
+  });
+
+  describe('reactivateCondition', () => {
+    it('should set status back to ACTIVE and clear the resolution date', async () => {
+      const condition = {
+        id: 'c1',
+        status: ConditionStatus.RESOLVED,
+        resolutionDate: new Date(),
+      };
+      mockConditionRepository.findOne.mockResolvedValue(condition);
+      mockConditionRepository.save.mockImplementation((c: any) => Promise.resolve(c));
+
+      const result = await service.reactivateCondition('c1', 'patient-001');
+
+      expect(result.status).toBe(ConditionStatus.ACTIVE);
+      expect(result.resolutionDate).toBeNull();
+    });
+  });
+
+  describe('hasCriticalConditions', () => {
+    it('should return true if an active condition name matches a critical term', async () => {
+      mockConditionRepository.find.mockResolvedValue([
+        { conditionName: 'Congestive Heart Failure' },
+      ]);
+
+      const result = await service.hasCriticalConditions('patient-001');
 
       expect(result).toBe(true);
     });
 
-    it('should return false if no high-risk conditions', async () => {
-      const conditions = [
-        { condition: 'Hypertension' },
-        { condition: 'Anxiety' },
-      ];
+    it('should return false if no active condition matches a critical term', async () => {
+      mockConditionRepository.find.mockResolvedValue([{ conditionName: 'Seasonal allergies' }]);
 
-      mockRepository.find.mockResolvedValue(conditions);
-
-      const result = await service.hasHighRiskCondition('patient-001');
+      const result = await service.hasCriticalConditions('patient-001');
 
       expect(result).toBe(false);
-    });
-  });
-
-  describe('getConditionDuration', () => {
-    it('should calculate condition duration', async () => {
-      const condition = {
-        dateOfDiagnosis: new Date('2020-01-01'),
-        status: 'active',
-      };
-
-      const duration = service.calculateDuration(
-        condition.dateOfDiagnosis,
-        new Date('2026-08-16'),
-      );
-
-      expect(typeof duration).toBe('number');
-      expect(duration).toBeGreaterThan(0);
-    });
-
-    it('should return 0 for resolved conditions', async () => {
-      const condition = {
-        dateOfDiagnosis: new Date('2022-01-01'),
-        resolvedAt: new Date('2022-06-01'),
-      };
-
-      const duration = service.calculateDuration(
-        condition.dateOfDiagnosis,
-        condition.resolvedAt,
-      );
-
-      expect(typeof duration).toBe('number');
-    });
-  });
-
-  describe('searchConditions', () => {
-    it('should search conditions by name', async () => {
-      const conditions = [
-        { id: 'cond-001', condition: 'Hypertension' },
-      ];
-
-      mockRepository.find.mockResolvedValue(conditions);
-
-      const result = await service.searchByName('Hyper');
-
-      expect(Array.isArray(result)).toBe(true);
-    });
-  });
-
-  describe('getConditionSeverity', () => {
-    it('should return condition severity level', async () => {
-      const condition = {
-        condition: 'Hypertension',
-        severity: 'moderate',
-      };
-
-      mockRepository.findOne.mockResolvedValue(condition);
-
-      const result = await service.getSeverity('cond-001');
-
-      expect(result).toBe('moderate');
     });
   });
 });

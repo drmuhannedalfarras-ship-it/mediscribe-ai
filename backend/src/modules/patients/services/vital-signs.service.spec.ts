@@ -1,34 +1,53 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { VitalSignsService } from './vital-signs.service';
-import { PatientVitalSigns } from '@entities/patient-vital-signs.entity';
+import { VitalSigns } from '@entities/vital-signs.entity';
+import { Patient } from '@entities/patient.entity';
+import { User } from '@entities/user.entity';
+
+function withBmi(data: any) {
+  return {
+    ...data,
+    calculateBMI(): number | null {
+      if (!this.height || !this.weight) {
+        return null;
+      }
+      const heightInMeters = this.height / 100;
+      return Math.round((this.weight / (heightInMeters * heightInMeters)) * 100) / 100;
+    },
+  };
+}
 
 describe('VitalSignsService', () => {
   let service: VitalSignsService;
-  let mockRepository: any;
+  let mockVitalSignsRepository: any;
+  let mockPatientRepository: any;
+  let mockUserRepository: any;
 
   beforeEach(async () => {
-    mockRepository = {
-      find: jest.fn(),
-      findOne: jest.fn(),
+    mockVitalSignsRepository = {
+      create: jest.fn((data) => withBmi(data)),
       save: jest.fn(),
-      query: jest.fn(),
-      createQueryBuilder: jest.fn(() => ({
-        where: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getMany: jest.fn(),
-      })),
+      findOne: jest.fn(),
+      find: jest.fn(),
+      findAndCount: jest.fn(),
+    };
+
+    mockPatientRepository = {
+      findOne: jest.fn(),
+    };
+
+    mockUserRepository = {
+      findOne: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VitalSignsService,
-        {
-          provide: getRepositoryToken(PatientVitalSigns),
-          useValue: mockRepository,
-        },
+        { provide: getRepositoryToken(VitalSigns), useValue: mockVitalSignsRepository },
+        { provide: getRepositoryToken(Patient), useValue: mockPatientRepository },
+        { provide: getRepositoryToken(User), useValue: mockUserRepository },
       ],
     }).compile();
 
@@ -36,347 +55,154 @@ describe('VitalSignsService', () => {
   });
 
   describe('recordVitalSigns', () => {
-    it('should record vital signs for patient', async () => {
-      const vitals = {
-        patientId: 'patient-001',
-        systolic: 130,
-        diastolic: 80,
-        heartRate: 70,
-        temperature: 98.6,
+    it('should record vital signs and compute BMI', async () => {
+      mockPatientRepository.findOne.mockResolvedValue({ id: 'patient-001' });
+      mockVitalSignsRepository.save.mockImplementation((v: any) => Promise.resolve(v));
+
+      const result = await service.recordVitalSigns('patient-001', {
+        height: 180,
+        weight: 80,
+        systolicBP: 120,
+        diastolicBP: 80,
+        pulse: 70,
+        temperature: 37,
         respiratoryRate: 16,
-        oxygenSaturation: 98,
-      };
+        spO2: 98,
+      } as any);
 
-      mockRepository.save.mockResolvedValue({ id: 'vitals-001', ...vitals });
-
-      const result = await service.recordVitalSigns(vitals);
-
-      expect(mockRepository.save).toHaveBeenCalled();
-      expect(result.systolic).toBe(130);
+      expect(result.bmi).toBeCloseTo(24.69);
+      expect(mockVitalSignsRepository.save).toHaveBeenCalled();
     });
 
-    it('should validate vital signs ranges', () => {
-      const vitals = {
-        systolic: 130,
-        diastolic: 80,
-        heartRate: 70,
-        temperature: 98.6,
-      };
+    it('should throw NotFoundException if the patient does not exist', async () => {
+      mockPatientRepository.findOne.mockResolvedValue(null);
 
-      const isValid = service.validateVitals(vitals);
-
-      expect(isValid).toBe(true);
+      await expect(
+        service.recordVitalSigns('missing', { pulse: 70 } as any),
+      ).rejects.toThrow(NotFoundException);
     });
 
-    it('should reject out-of-range vital signs', () => {
-      const invalidVitals = {
-        systolic: 300, // Too high
-        diastolic: 80,
-        heartRate: 70,
-      };
+    it('should throw BadRequestException if a value is out of range', async () => {
+      mockPatientRepository.findOne.mockResolvedValue({ id: 'patient-001' });
 
-      const isValid = service.validateVitals(invalidVitals);
-
-      expect(isValid).toBe(false);
+      await expect(
+        service.recordVitalSigns('patient-001', { pulse: 400 } as any),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
   describe('getLatestVitalSigns', () => {
-    it('should return latest vital signs', async () => {
-      const latestVitals = {
-        patientId: 'patient-001',
-        systolic: 130,
-        diastolic: 80,
-        heartRate: 72,
-        date: new Date(),
-      };
-
-      mockRepository.createQueryBuilder().getMany.mockResolvedValue([latestVitals]);
+    it('should return the most recent record', async () => {
+      mockPatientRepository.findOne.mockResolvedValue({ id: 'patient-001' });
+      const latest = { id: 'v1' };
+      mockVitalSignsRepository.findOne.mockResolvedValue(latest);
 
       const result = await service.getLatestVitalSigns('patient-001');
 
-      expect(result).toBeDefined();
-      expect(result.systolic).toBe(130);
+      expect(result).toBe(latest);
     });
 
-    it('should return null if no vital signs recorded', async () => {
-      mockRepository.createQueryBuilder().getMany.mockResolvedValue([]);
+    it('should throw NotFoundException if the patient does not exist', async () => {
+      mockPatientRepository.findOne.mockResolvedValue(null);
 
-      const result = await service.getLatestVitalSigns('patient-001');
-
-      expect(result).toBeUndefined();
+      await expect(service.getLatestVitalSigns('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
   describe('getVitalSignsHistory', () => {
-    it('should return vital signs history', async () => {
-      const history = [
-        {
-          systolic: 130,
-          diastolic: 80,
-          date: new Date('2026-08-10'),
-        },
-        {
-          systolic: 128,
-          diastolic: 79,
-          date: new Date('2026-08-15'),
-        },
-      ];
+    it('should return paginated history', async () => {
+      mockPatientRepository.findOne.mockResolvedValue({ id: 'patient-001' });
+      mockVitalSignsRepository.findAndCount.mockResolvedValue([[{ id: 'v1' }], 1]);
 
-      mockRepository.find.mockResolvedValue(history);
+      const result = await service.getVitalSignsHistory('patient-001', 0, 20);
 
-      const result = await service.getVitalSignsHistory('patient-001', 30);
-
-      expect(Array.isArray(result)).toBe(true);
-      expect(result.length).toBe(2);
+      expect(result.data).toHaveLength(1);
+      expect(result.total).toBe(1);
     });
   });
 
-  describe('detectAbnormalVitals', () => {
-    it('should flag hypertension', () => {
-      const vitals = {
-        systolic: 160,
-        diastolic: 100,
-        heartRate: 70,
-      };
+  describe('getVitalSignsByDateRange', () => {
+    it('should return records within range for an existing patient', async () => {
+      mockPatientRepository.findOne.mockResolvedValue({ id: 'patient-001' });
+      const records = [{ id: 'v1' }];
+      mockVitalSignsRepository.find.mockResolvedValue(records);
 
-      const abnormalities = service.detectAbnormalities(vitals);
+      const result = await service.getVitalSignsByDateRange(
+        'patient-001',
+        new Date('2026-01-01'),
+        new Date('2026-01-31'),
+      );
 
-      expect(abnormalities.some(a => a.type === 'hypertension')).toBe(true);
-    });
-
-    it('should flag hypotension', () => {
-      const vitals = {
-        systolic: 85,
-        diastolic: 50,
-        heartRate: 70,
-      };
-
-      const abnormalities = service.detectAbnormalities(vitals);
-
-      expect(abnormalities.some(a => a.type === 'hypotension')).toBe(true);
-    });
-
-    it('should flag tachycardia', () => {
-      const vitals = {
-        systolic: 120,
-        diastolic: 80,
-        heartRate: 110,
-      };
-
-      const abnormalities = service.detectAbnormalities(vitals);
-
-      expect(abnormalities.some(a => a.type === 'tachycardia')).toBe(true);
-    });
-
-    it('should flag bradycardia', () => {
-      const vitals = {
-        systolic: 120,
-        diastolic: 80,
-        heartRate: 45,
-      };
-
-      const abnormalities = service.detectAbnormalities(vitals);
-
-      expect(abnormalities.some(a => a.type === 'bradycardia')).toBe(true);
-    });
-
-    it('should flag fever', () => {
-      const vitals = {
-        temperature: 102.5,
-        heartRate: 70,
-      };
-
-      const abnormalities = service.detectAbnormalities(vitals);
-
-      expect(abnormalities.some(a => a.type === 'fever')).toBe(true);
-    });
-
-    it('should flag hypoxemia', () => {
-      const vitals = {
-        oxygenSaturation: 88,
-        heartRate: 70,
-      };
-
-      const abnormalities = service.detectAbnormalities(vitals);
-
-      expect(abnormalities.some(a => a.type === 'hypoxemia')).toBe(true);
+      expect(result).toBe(records);
     });
   });
 
-  describe('calculateBP Classification', () => {
-    it('should classify normal blood pressure', () => {
-      const classification = service.classifyBloodPressure(120, 80);
+  describe('updateVitalSigns', () => {
+    it('should update only provided fields and recompute BMI', async () => {
+      mockVitalSignsRepository.findOne.mockResolvedValue(
+        withBmi({ id: 'v1', patientId: 'patient-001', height: 180, weight: 80, pulse: 70 }),
+      );
+      mockVitalSignsRepository.save.mockImplementation((v: any) => Promise.resolve(v));
 
-      expect(classification).toBe('Normal');
+      const result = await service.updateVitalSigns('patient-001', 'v1', { weight: 90 } as any);
+
+      expect(result.weight).toBe(90);
+      expect(result.pulse).toBe(70);
+      expect(result.bmi).toBeCloseTo(27.78);
     });
 
-    it('should classify elevated blood pressure', () => {
-      const classification = service.classifyBloodPressure(130, 85);
+    it('should throw NotFoundException if the record does not exist', async () => {
+      mockVitalSignsRepository.findOne.mockResolvedValue(null);
 
-      expect(classification).toBe('Elevated');
+      await expect(
+        service.updateVitalSigns('patient-001', 'missing', {} as any),
+      ).rejects.toThrow(NotFoundException);
     });
 
-    it('should classify stage 1 hypertension', () => {
-      const classification = service.classifyBloodPressure(140, 90);
+    it('should throw BadRequestException if an updated value is out of range', async () => {
+      mockVitalSignsRepository.findOne.mockResolvedValue(withBmi({ id: 'v1' }));
 
-      expect(classification).toBe('Stage 1 Hypertension');
-    });
-
-    it('should classify stage 2 hypertension', () => {
-      const classification = service.classifyBloodPressure(160, 100);
-
-      expect(classification).toBe('Stage 2 Hypertension');
-    });
-
-    it('should classify hypertensive crisis', () => {
-      const classification = service.classifyBloodPressure(180, 120);
-
-      expect(classification).toBe('Hypertensive Crisis');
-    });
-  });
-
-  describe('getVitalSignsTrend', () => {
-    it('should identify increasing trend', async () => {
-      const vitals = [
-        { systolic: 120 },
-        { systolic: 125 },
-        { systolic: 130 },
-        { systolic: 135 },
-      ];
-
-      mockRepository.find.mockResolvedValue(vitals);
-
-      const trend = await service.getVitalSignsTrend('patient-001', 'systolic', 30);
-
-      expect(trend.direction).toBe('increasing');
-    });
-
-    it('should identify decreasing trend', async () => {
-      const vitals = [
-        { systolic: 140 },
-        { systolic: 135 },
-        { systolic: 130 },
-        { systolic: 120 },
-      ];
-
-      mockRepository.find.mockResolvedValue(vitals);
-
-      const trend = await service.getVitalSignsTrend('patient-001', 'systolic', 30);
-
-      expect(trend.direction).toBe('decreasing');
-    });
-
-    it('should identify stable trend', async () => {
-      const vitals = [
-        { systolic: 130 },
-        { systolic: 131 },
-        { systolic: 130 },
-        { systolic: 129 },
-      ];
-
-      mockRepository.find.mockResolvedValue(vitals);
-
-      const trend = await service.getVitalSignsTrend('patient-001', 'systolic', 30);
-
-      expect(trend.direction).toBe('stable');
+      await expect(
+        service.updateVitalSigns('patient-001', 'v1', { spO2: 10 } as any),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
-  describe('compareWithNormal', () => {
-    it('should compare vital signs with normal ranges', () => {
-      const vitals = {
-        systolic: 130,
-        diastolic: 80,
-        heartRate: 70,
-        temperature: 98.6,
-        oxygenSaturation: 98,
-      };
+  describe('checkForAbnormalities', () => {
+    it('should flag fever, hypertensive crisis, tachycardia, low SpO2, and tachypnea', () => {
+      const result = service.checkForAbnormalities({
+        temperature: 39,
+        systolicBP: 190,
+        diastolicBP: 125,
+        pulse: 110,
+        spO2: 88,
+        respiratoryRate: 25,
+      } as VitalSigns);
 
-      const comparison = service.compareWithNormal(vitals);
-
-      expect(comparison).toBeDefined();
-      expect(comparison.heartRate.status).toBe('normal');
-      expect(comparison.temperature.status).toBe('normal');
+      expect(result).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Fever'),
+          expect.stringContaining('Hypertensive crisis'),
+          expect.stringContaining('Tachycardia'),
+          expect.stringContaining('Low oxygen saturation'),
+          expect.stringContaining('Tachypnea'),
+        ]),
+      );
     });
 
-    it('should flag abnormal values in comparison', () => {
-      const vitals = {
-        systolic: 170,
-        diastolic: 100,
-        heartRate: 50,
-        temperature: 102,
-      };
+    it('should return an empty list for normal vital signs', () => {
+      const result = service.checkForAbnormalities({
+        temperature: 37,
+        systolicBP: 120,
+        diastolicBP: 80,
+        pulse: 70,
+        spO2: 98,
+        respiratoryRate: 16,
+      } as VitalSigns);
 
-      const comparison = service.compareWithNormal(vitals);
-
-      expect(comparison.systolic.status).toBe('abnormal');
-      expect(comparison.temperature.status).toBe('abnormal');
-    });
-  });
-
-  describe('getAverageVitalSigns', () => {
-    it('should calculate average vital signs over period', async () => {
-      const vitals = [
-        { systolic: 130, diastolic: 80, heartRate: 70 },
-        { systolic: 132, diastolic: 82, heartRate: 72 },
-        { systolic: 128, diastolic: 78, heartRate: 68 },
-      ];
-
-      mockRepository.find.mockResolvedValue(vitals);
-
-      const average = await service.getAverageVitalSigns('patient-001', 30);
-
-      expect(average.systolic).toBe(130);
-      expect(average.diastolic).toBe(80);
-      expect(average.heartRate).toBe(70);
-    });
-  });
-
-  describe('identifyCriticalValues', () => {
-    it('should identify critical vital signs', async () => {
-      const vitals = {
-        systolic: 200,
-        diastolic: 120,
-        heartRate: 30,
-        oxygenSaturation: 70,
-      };
-
-      mockRepository.save.mockResolvedValue(vitals);
-
-      const critical = service.identifyCriticalValues(vitals);
-
-      expect(critical.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('calculatePulsePresure', () => {
-    it('should calculate pulse pressure correctly', () => {
-      const systolic = 140;
-      const diastolic = 80;
-
-      const pulsePressure = service.calculatePulsePressure(systolic, diastolic);
-
-      expect(pulsePressure).toBe(60);
-    });
-  });
-
-  describe('getVitalSignsStatistics', () => {
-    it('should return vital signs statistics', async () => {
-      const vitals = [
-        { systolic: 130, diastolic: 80 },
-        { systolic: 135, diastolic: 85 },
-        { systolic: 125, diastolic: 75 },
-      ];
-
-      mockRepository.find.mockResolvedValue(vitals);
-
-      const stats = await service.getVitalSignsStatistics('patient-001', 30);
-
-      expect(stats.min).toBeDefined();
-      expect(stats.max).toBeDefined();
-      expect(stats.mean).toBeDefined();
-      expect(stats.stdDev).toBeDefined();
+      expect(result).toEqual([]);
     });
   });
 });

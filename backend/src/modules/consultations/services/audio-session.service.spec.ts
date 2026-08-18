@@ -2,351 +2,259 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AudioSessionService } from './audio-session.service';
-import { AudioSession } from '@entities/audio-session.entity';
+import { AudioSession, AudioSessionStatus } from '@entities/audio-session.entity';
+import { Consultation } from '@entities/consultation.entity';
 
 describe('AudioSessionService', () => {
   let service: AudioSessionService;
-  let mockRepository: any;
+  let mockAudioSessionRepository: any;
+  let mockConsultationRepository: any;
 
   beforeEach(async () => {
-    mockRepository = {
-      find: jest.fn(),
-      findOne: jest.fn(),
+    mockAudioSessionRepository = {
+      create: jest.fn((data) => data),
       save: jest.fn(),
-      update: jest.fn(),
+      findOne: jest.fn(),
+      find: jest.fn(),
+      count: jest.fn(),
+      softRemove: jest.fn(),
+    };
+
+    mockConsultationRepository = {
+      findOne: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AudioSessionService,
-        {
-          provide: getRepositoryToken(AudioSession),
-          useValue: mockRepository,
-        },
+        { provide: getRepositoryToken(AudioSession), useValue: mockAudioSessionRepository },
+        { provide: getRepositoryToken(Consultation), useValue: mockConsultationRepository },
       ],
     }).compile();
 
     service = module.get<AudioSessionService>(AudioSessionService);
   });
 
-  describe('startAudioSession', () => {
-    it('should start new audio session', async () => {
-      const sessionData = {
-        consultationId: 'consul-001',
-        physicianId: 'phys-001',
-        patientId: 'patient-001',
-        status: 'recording',
-      };
+  describe('startRecording', () => {
+    it('should create a new session when none exists yet', async () => {
+      mockConsultationRepository.findOne.mockResolvedValue({ id: 'consul-001' });
+      mockAudioSessionRepository.findOne.mockResolvedValue(null);
+      mockAudioSessionRepository.save.mockImplementation((s: any) => Promise.resolve(s));
 
-      mockRepository.save.mockResolvedValue({ id: 'audio-001', ...sessionData });
+      const result = await service.startRecording('consul-001');
 
-      const result = await service.startAudioSession(sessionData);
-
-      expect(mockRepository.save).toHaveBeenCalled();
-      expect(result.status).toBe('recording');
+      expect(result.status).toBe(AudioSessionStatus.RECORDING);
+      expect(mockAudioSessionRepository.create).toHaveBeenCalled();
     });
 
-    it('should set start timestamp', async () => {
-      const sessionData = {
-        consultationId: 'consul-001',
-        physicianId: 'phys-001',
-        status: 'recording',
+    it('should reset an existing non-recording session instead of creating a second row', async () => {
+      mockConsultationRepository.findOne.mockResolvedValue({ id: 'consul-001' });
+      const existing = {
+        id: 'session-001',
+        status: AudioSessionStatus.PROCESSED,
+        audioFileUrl: '/old/file.webm',
+        wordCount: 42,
       };
+      mockAudioSessionRepository.findOne.mockResolvedValue(existing);
+      mockAudioSessionRepository.save.mockImplementation((s: any) => Promise.resolve(s));
 
-      mockRepository.save.mockResolvedValue({
-        id: 'audio-001',
-        ...sessionData,
-        startTime: expect.any(Date),
+      const result = await service.startRecording('consul-001');
+
+      expect(result).toBe(existing);
+      expect(result.status).toBe(AudioSessionStatus.RECORDING);
+      expect(result.audioFileUrl).toBeNull();
+      expect(result.wordCount).toBeNull();
+      expect(mockAudioSessionRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw BadRequestException if a recording is already in progress', async () => {
+      mockConsultationRepository.findOne.mockResolvedValue({ id: 'consul-001' });
+      mockAudioSessionRepository.findOne.mockResolvedValue({
+        status: AudioSessionStatus.RECORDING,
       });
 
-      const result = await service.startAudioSession(sessionData);
-
-      expect(result.startTime).toBeDefined();
+      await expect(service.startRecording('consul-001')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
-    it('should reject if consultation already has active session', async () => {
-      mockRepository.findOne.mockResolvedValue({ id: 'audio-001', status: 'recording' });
+    it('should throw NotFoundException if the consultation does not exist', async () => {
+      mockConsultationRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.startRecording('missing')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('stopRecording', () => {
+    it('should mark the session as processing and store duration in seconds', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue({
+        status: AudioSessionStatus.RECORDING,
+      });
+      mockAudioSessionRepository.save.mockImplementation((s: any) => Promise.resolve(s));
+
+      const result = await service.stopRecording('consul-001', '/uploads/a.webm', 15000);
+
+      expect(result.status).toBe(AudioSessionStatus.PROCESSING);
+      expect(result.durationSeconds).toBe(15);
+      expect(result.audioFileUrl).toBe('/uploads/a.webm');
+    });
+
+    it('should throw NotFoundException if there is no active recording', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue(null);
 
       await expect(
-        service.startAudioSession({ consultationId: 'consul-001' }),
-      ).rejects.toThrow();
+        service.stopRecording('consul-001', '/uploads/a.webm', 15000),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw BadRequestException if the recording is shorter than 10 seconds', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue({
+        status: AudioSessionStatus.RECORDING,
+      });
+
+      await expect(
+        service.stopRecording('consul-001', '/uploads/a.webm', 5000),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException if the recording exceeds 60 minutes', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue({
+        status: AudioSessionStatus.RECORDING,
+      });
+
+      await expect(
+        service.stopRecording('consul-001', '/uploads/a.webm', 3600 * 1000 + 1),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
-  describe('stopAudioSession', () => {
-    it('should stop audio session and record duration', async () => {
-      const session = {
-        id: 'audio-001',
-        status: 'recording',
-        startTime: new Date('2026-08-16T10:00:00'),
-      };
-
-      mockRepository.findOne.mockResolvedValue(session);
-      mockRepository.save.mockResolvedValue({
-        ...session,
-        status: 'completed',
-        endTime: new Date('2026-08-16T10:15:00'),
+  describe('saveUploadedAudio', () => {
+    it('should stop the recording and attach file metadata', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue({
+        status: AudioSessionStatus.RECORDING,
       });
+      mockAudioSessionRepository.save.mockImplementation((s: any) => Promise.resolve(s));
 
-      const result = await service.stopAudioSession('audio-001');
+      const result = await service.saveUploadedAudio(
+        'consul-001',
+        '/uploads/a.webm',
+        20000,
+        'webm',
+        15000,
+      );
 
-      expect(result.status).toBe('completed');
-      expect(result.endTime).toBeDefined();
-    });
-
-    it('should calculate session duration', async () => {
-      const session = {
-        id: 'audio-001',
-        startTime: new Date('2026-08-16T10:00:00'),
-        endTime: new Date('2026-08-16T10:15:00'),
-      };
-
-      const duration = service.calculateDuration(session.startTime, session.endTime);
-
-      expect(typeof duration).toBe('number');
-      expect(duration).toBeGreaterThan(0);
+      expect(result.audioFileSize).toBe(20000);
+      expect(result.audioFormat).toBe('webm');
+      expect(result.durationSeconds).toBe(15);
     });
   });
 
-  describe('pauseAudioSession', () => {
-    it('should pause recording session', async () => {
-      const session = {
-        id: 'audio-001',
-        status: 'recording',
-      };
+  describe('markTranscribed', () => {
+    it('should mark the session processed with a word count', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue({ id: 'session-001' });
+      mockAudioSessionRepository.save.mockImplementation((s: any) => Promise.resolve(s));
 
-      mockRepository.findOne.mockResolvedValue(session);
-      mockRepository.save.mockResolvedValue({
-        ...session,
-        status: 'paused',
-      });
+      const result = await service.markTranscribed('consul-001', 120);
 
-      const result = await service.pauseAudioSession('audio-001');
-
-      expect(result.status).toBe('paused');
+      expect(result.status).toBe(AudioSessionStatus.PROCESSED);
+      expect(result.wordCount).toBe(120);
     });
 
-    it('should resume paused session', async () => {
-      const session = {
-        id: 'audio-001',
-        status: 'paused',
-      };
+    it('should throw NotFoundException if no session exists', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue(null);
 
-      mockRepository.findOne.mockResolvedValue(session);
-      mockRepository.save.mockResolvedValue({
-        ...session,
-        status: 'recording',
-      });
-
-      const result = await service.resumeAudioSession('audio-001');
-
-      expect(result.status).toBe('recording');
-    });
-  });
-
-  describe('getAudioSession', () => {
-    it('should retrieve audio session details', async () => {
-      const session = {
-        id: 'audio-001',
-        consultationId: 'consul-001',
-        status: 'recording',
-        duration: 900,
-      };
-
-      mockRepository.findOne.mockResolvedValue(session);
-
-      const result = await service.getAudioSession('audio-001');
-
-      expect(result).toBeDefined();
-      expect(result.consultationId).toBe('consul-001');
-    });
-
-    it('should throw NotFoundException if session not found', async () => {
-      mockRepository.findOne.mockResolvedValue(null);
-
-      await expect(service.getAudioSession('invalid-id')).rejects.toThrow(
+      await expect(service.markTranscribed('missing', 10)).rejects.toThrow(
         NotFoundException,
       );
     });
   });
 
-  describe('uploadAudioFile', () => {
-    it('should store audio file reference', async () => {
-      const uploadData = {
-        sessionId: 'audio-001',
-        filePath: '/audio/session-001.wav',
-        fileSize: 5000000,
-        format: 'wav',
-      };
+  describe('markTranscriptionFailed', () => {
+    it('should mark the session failed with an error message', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue({ id: 'session-001' });
+      mockAudioSessionRepository.save.mockImplementation((s: any) => Promise.resolve(s));
 
-      mockRepository.save.mockResolvedValue({
-        id: 'audio-001',
-        ...uploadData,
-      });
+      const result = await service.markTranscriptionFailed('consul-001', 'boom');
 
-      const result = await service.uploadAudioFile('audio-001', uploadData);
-
-      expect(result.filePath).toBe('/audio/session-001.wav');
-    });
-
-    it('should validate audio file format', () => {
-      const validFormats = ['wav', 'mp3', 'm4a', 'aac'];
-
-      validFormats.forEach(format => {
-        expect(service.isValidAudioFormat(format)).toBe(true);
-      });
-    });
-
-    it('should reject invalid audio format', () => {
-      expect(service.isValidAudioFormat('doc')).toBe(false);
+      expect(result.status).toBe(AudioSessionStatus.FAILED);
+      expect(result.errorMessage).toBe('boom');
     });
   });
 
-  describe('getAudioDuration', () => {
-    it('should calculate total audio duration', async () => {
-      const session = {
-        id: 'audio-001',
-        startTime: new Date('2026-08-16T10:00:00'),
-        endTime: new Date('2026-08-16T10:30:00'),
-      };
+  describe('validateAudioFile', () => {
+    it('should accept a supported format under the size limit', () => {
+      const result = service.validateAudioFile('recording.webm', 1024);
 
-      mockRepository.findOne.mockResolvedValue(session);
+      expect(result.valid).toBe(true);
+    });
 
-      const duration = await service.getAudioDuration('audio-001');
+    it('should reject an unsupported extension', () => {
+      const result = service.validateAudioFile('recording.mov', 1024);
 
-      expect(typeof duration).toBe('number');
-      expect(duration).toBeGreaterThan(0);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Unsupported audio format');
+    });
+
+    it('should reject a file over the size limit', () => {
+      const result = service.validateAudioFile('recording.webm', 600 * 1024 * 1024);
+
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('too large');
     });
   });
 
-  describe('validateAudioQuality', () => {
-    it('should validate audio quality metrics', () => {
-      const audioMetrics = {
-        sampleRate: 44100,
-        channels: 2,
-        bitDepth: 16,
-      };
+  describe('getAudioStats', () => {
+    it('should aggregate totals across sessions', async () => {
+      mockAudioSessionRepository.find.mockResolvedValue([
+        { durationSeconds: 60, wordCount: 100 },
+        { durationSeconds: 120, wordCount: 200 },
+      ]);
+      mockAudioSessionRepository.count.mockResolvedValueOnce(5).mockResolvedValueOnce(1);
 
-      const isValid = service.validateAudioMetrics(audioMetrics);
+      const stats = await service.getAudioStats();
 
-      expect(isValid).toBe(true);
-    });
-
-    it('should reject low sample rate', () => {
-      const audioMetrics = {
-        sampleRate: 8000, // Too low for speech
-        channels: 1,
-        bitDepth: 16,
-      };
-
-      const isValid = service.validateAudioMetrics(audioMetrics);
-
-      expect(isValid).toBe(false);
+      expect(stats.completed).toBe(2);
+      expect(stats.totalSessions).toBe(5);
+      expect(stats.failed).toBe(1);
+      expect(stats.totalDuration).toBe(180);
+      expect(stats.avgDuration).toBe(90);
+      expect(stats.totalWords).toBe(300);
     });
   });
 
-  describe('checkAudioNoise', () => {
-    it('should detect excessive noise in audio', () => {
-      const audioData = {
-        noiseLevel: 0.8, // High noise
-      };
+  describe('deleteRecording', () => {
+    it('should soft-remove the session', async () => {
+      const session = { id: 'session-001' };
+      mockAudioSessionRepository.findOne.mockResolvedValue(session);
 
-      const hasExcessiveNoise = service.hasExcessiveNoise(audioData);
+      await service.deleteRecording('consul-001');
 
-      expect(hasExcessiveNoise).toBe(true);
+      expect(mockAudioSessionRepository.softRemove).toHaveBeenCalledWith(session);
     });
 
-    it('should accept acceptable noise levels', () => {
-      const audioData = {
-        noiseLevel: 0.2, // Acceptable
-      };
+    it('should throw NotFoundException if no session exists', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue(null);
 
-      const hasExcessiveNoise = service.hasExcessiveNoise(audioData);
-
-      expect(hasExcessiveNoise).toBe(false);
+      await expect(service.deleteRecording('missing')).rejects.toThrow(NotFoundException);
     });
   });
 
-  describe('getAudioMetadata', () => {
-    it('should retrieve audio session metadata', async () => {
-      const session = {
-        id: 'audio-001',
-        consultationId: 'consul-001',
-        startTime: new Date(),
-        endTime: new Date(),
-        format: 'wav',
-        fileSize: 5000000,
-      };
+  describe('getAudioSessionDetails', () => {
+    it('should return the session when found', async () => {
+      const session = { id: 'session-001' };
+      mockAudioSessionRepository.findOne.mockResolvedValue(session);
 
-      mockRepository.findOne.mockResolvedValue(session);
+      const result = await service.getAudioSessionDetails('consul-001');
 
-      const metadata = await service.getAudioMetadata('audio-001');
-
-      expect(metadata).toBeDefined();
-      expect(metadata.format).toBe('wav');
-    });
-  });
-
-  describe('deleteAudioFile', () => {
-    it('should mark audio file for deletion', async () => {
-      const session = {
-        id: 'audio-001',
-        status: 'completed',
-      };
-
-      mockRepository.findOne.mockResolvedValue(session);
-      mockRepository.save.mockResolvedValue({
-        ...session,
-        status: 'deleted',
-        deletedAt: new Date(),
-      });
-
-      const result = await service.deleteAudioFile('audio-001');
-
-      expect(result.status).toBe('deleted');
-    });
-  });
-
-  describe('calculateAudioStats', () => {
-    it('should calculate audio statistics', () => {
-      const sessions = [
-        { duration: 900 },
-        { duration: 1200 },
-        { duration: 600 },
-      ];
-
-      const stats = service.calculateSessionStats(sessions);
-
-      expect(stats.total).toBe(2700);
-      expect(stats.average).toBe(900);
-      expect(stats.count).toBe(3);
-    });
-  });
-
-  describe('validateSpeakerDiarization', () => {
-    it('should validate speaker identification data', () => {
-      const diarizationData = {
-        speakers: [
-          { id: 'speaker-1', name: 'Physician' },
-          { id: 'speaker-2', name: 'Patient' },
-        ],
-      };
-
-      const isValid = service.isValidDiarization(diarizationData);
-
-      expect(isValid).toBe(true);
+      expect(result).toBe(session);
     });
 
-    it('should require at least 2 speakers', () => {
-      const diarizationData = {
-        speakers: [
-          { id: 'speaker-1', name: 'Physician' },
-        ],
-      };
+    it('should throw NotFoundException when no session exists', async () => {
+      mockAudioSessionRepository.findOne.mockResolvedValue(null);
 
-      const isValid = service.isValidDiarization(diarizationData);
-
-      expect(isValid).toBe(false);
+      await expect(service.getAudioSessionDetails('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });
