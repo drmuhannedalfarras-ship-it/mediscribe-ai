@@ -1,5 +1,15 @@
 # MediScribe AI - Clinical AI Copilot
 
+[![License](https://img.shields.io/badge/license-proprietary-red.svg)](./LICENSE)
+![NestJS](https://img.shields.io/badge/NestJS-backend-e0234e.svg)
+![Angular](https://img.shields.io/badge/Angular-frontend-dd0031.svg)
+![TypeScript](https://img.shields.io/badge/TypeScript-typed-3178c6.svg)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-database-4169e1.svg)
+![TypeORM](https://img.shields.io/badge/TypeORM-ORM-e83524.svg)
+![Docker](https://img.shields.io/badge/Docker-local%20dev-2496ed.svg)
+![Healthcare](https://img.shields.io/badge/domain-healthcare-2e8b57.svg)
+![Clinical Documentation](https://img.shields.io/badge/domain-clinical--documentation-2e8b57.svg)
+
 A clinical documentation platform: physicians record a consultation, the audio is transcribed, and the transcript moves through a review workflow to a finalized record.
 
 **Current status:** patient management, consultation lifecycle, audio recording, and the physician review workflow (AI review ready → physician review → finalized, with send-back for re-recording) are implemented and tested end-to-end. Transcription currently uses a **mock provider** (a small pool of canned physician/patient exchanges) rather than a real speech-to-text service — see [Scope](#scope--whats-mocked).
